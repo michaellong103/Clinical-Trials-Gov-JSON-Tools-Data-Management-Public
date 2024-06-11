@@ -3,7 +3,6 @@
 ClinicalTrials.gov Data Management Tools for AI projects.
 
 [My Portfolio](https://pm.mikeylong.com)  
-[FlowUX Team](https://flowux.tr)
 
 # Clinical Trials Data Management Program - Pub
 
