@@ -16,6 +16,9 @@ def print_step(message, step):
     color = shades_of_green[step % len(shades_of_green)]
     print(f"{color}{message}{reset_color}")
 
+def print_in_red(message):
+    print(f"\033[31m{message}\033[0m")
+
 def list_directories(base_path):
     if not os.path.exists(base_path):
         print(f"Base path '{base_path}' does not exist.")
@@ -64,13 +67,13 @@ def search_in_dict(d, condition, path=""):
     if isinstance(d, dict):
         for key, value in d.items():
             new_path = f"{path}.{key}" if path else key
+            if key == "BriefTitle" and isinstance(value, str):
+                if condition.lower() in value.lower():
+                    return new_path
             if isinstance(value, (dict, list)):
                 found_path = search_in_dict(value, condition, new_path)
                 if found_path:
                     return found_path
-            elif isinstance(value, str):
-                if condition.lower() in value.lower():
-                    return new_path
     elif isinstance(d, list):
         for index, item in enumerate(d):
             new_path = f"{path}[{index}]"
@@ -105,11 +108,10 @@ def save_filtered_data(filtered_data, file_mapping, output_dir):
             output_path = os.path.join(output_dir, filename)
             with open(output_path, 'w') as file:
                 json.dump(matching_data, file, indent=2)
-            print(f"Saved {len(matching_data)} items to {output_path}.")
 
 def main(condition):
     extract_base_dir = os.path.join(BASE_DIR, '..', 'data', 'extracted')
-    output_dir = os.path.join(BASE_DIR, '..', 'data', 'processed', f'subset_{condition.lower()}')
+    output_dir = os.path.join(BASE_DIR, '..', 'data', 'processed', condition.replace(" ", "_"))
 
     directories = list_directories(extract_base_dir)
     
@@ -134,13 +136,16 @@ def main(condition):
     print(f"Read {len(data)} trials from extracted JSON files.")
 
     # Step 2: Filter the data by the specific condition
-    print_step("Step 2: Filtering data by condition...", 2)
+    print_step(f"Step 2: Filtering data by condition '{condition}'...", 2)
     filtered_data = filter_by_condition(data, condition)
 
     # Step 3: Save the filtered data into new JSON files
     if filtered_data:
         print_step("Step 3: Saving filtered data to JSON files...", 3)
         save_filtered_data(filtered_data, file_mapping, output_dir)
+
+    # Final report
+    print_in_red(f"Processed {len(data)} files. Found {len(filtered_data)} files containing '{condition}'.")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Process clinical trial data.')
