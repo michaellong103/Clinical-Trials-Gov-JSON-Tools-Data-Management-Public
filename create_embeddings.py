@@ -57,7 +57,10 @@ def process_all_files(limit_files):
     for subdir, _, files in os.walk(processed_data_dir):
         all_embeddings = []
         directory_name = os.path.basename(subdir)
-        embeddings_output_file = os.path.join(embeddings_output_dir, f'{directory_name}_embeddings.json')
+        
+        # Modify output filename based on the limit_files flag
+        filename_suffix = "first10" if limit_files else "all"
+        embeddings_output_file = os.path.join(embeddings_output_dir, f'{directory_name}_embeddings_{filename_suffix}.json')
         
         files_to_process = files[:10] if limit_files else files
         
