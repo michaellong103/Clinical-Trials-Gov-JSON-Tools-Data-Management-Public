@@ -3,7 +3,7 @@ import json
 import openai
 
 # Set your OpenAI API key here
-openai.api_key = '' 
+openai.api_key = ''
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 processed_data_dir = os.path.join(BASE_DIR, 'data', 'processed')
@@ -11,6 +11,8 @@ embeddings_output_dir = os.path.join(BASE_DIR, 'data', 'embeddings')
 
 # Ensure the embeddings directory exists
 os.makedirs(embeddings_output_dir, exist_ok=True)
+
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 20 MB in bytes
 
 # Function to read and parse JSON data from a file
 def read_json(file_path):
@@ -52,15 +54,47 @@ def find_brief_title(data):
                 return result
     return None
 
+# Function to write embeddings to file ensuring no file exceeds the maximum size
+def write_embeddings_to_file(directory_name, filename_suffix, embeddings):
+    file_count = 1
+    current_embeddings = []
+    current_size = 0
+
+    for embedding in embeddings:
+        embedding_size = len(json.dumps(embedding).encode('utf-8'))
+        
+        if current_size + embedding_size > MAX_FILE_SIZE:
+            output_file_path = os.path.join(embeddings_output_dir, f'{directory_name}_embeddings_{filename_suffix}_{file_count}.json')
+            with open(output_file_path, 'w') as outfile:
+                json.dump(current_embeddings, outfile, indent=4)
+            print(f"Saved embeddings to: {output_file_path}")
+            print(f"File size: {os.path.getsize(output_file_path)} bytes")
+
+            if os.path.getsize(output_file_path) > MAX_FILE_SIZE:
+                print(f"Error: File size {os.path.getsize(output_file_path)} exceeds 20 MB for {output_file_path}")
+
+            file_count += 1
+            current_embeddings = []
+            current_size = 0
+        
+        current_embeddings.append(embedding)
+        current_size += embedding_size
+
+    if current_embeddings:
+        output_file_path = os.path.join(embeddings_output_dir, f'{directory_name}_embeddings_{filename_suffix}_{file_count}.json')
+        with open(output_file_path, 'w') as outfile:
+            json.dump(current_embeddings, outfile, indent=4)
+        print(f"Saved embeddings to: {output_file_path}")
+        print(f"File size: {os.path.getsize(output_file_path)} bytes")
+
+        if os.path.getsize(output_file_path) > MAX_FILE_SIZE:
+            print(f"Error: File size {os.path.getsize(output_file_path)} exceeds 20 MB for {output_file_path}")
+
 # Function to process all files in the processed data directory
 def process_all_files(limit_files):
     for subdir, _, files in os.walk(processed_data_dir):
         all_embeddings = []
         directory_name = os.path.basename(subdir)
-        
-        # Modify output filename based on the limit_files flag
-        filename_suffix = "first10" if limit_files else "all"
-        embeddings_output_file = os.path.join(embeddings_output_dir, f'{directory_name}_embeddings_{filename_suffix}.json')
         
         files_to_process = files[:10] if limit_files else files
         
@@ -86,12 +120,9 @@ def process_all_files(limit_files):
                 else:
                     print(f"No BriefTitle found in file: {file_path}")
 
-        if all_embeddings:
-            with open(embeddings_output_file, 'w') as outfile:
-                json.dump(all_embeddings, outfile, indent=4)
-            print(f"Saved all embeddings to: {embeddings_output_file}")
-        else:
-            print(f"No embeddings were generated for directory: {directory_name}")
+        # Write embeddings to file, ensuring no file exceeds the maximum size
+        filename_suffix = "first10" if limit_files else "all"
+        write_embeddings_to_file(directory_name, filename_suffix, all_embeddings)
 
 # Run the processing function
 if __name__ == "__main__":

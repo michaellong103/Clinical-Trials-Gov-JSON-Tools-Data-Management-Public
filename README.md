@@ -61,6 +61,28 @@ This program automates downloading, extracting, processing, and analyzing JSON c
   - Extracts and filters data based on the condition.
   - Saves filtered data to the output directory.
 
+### 8. Filter and process data specifically for breast cancer (split_out_condition.py)
+
+- **Description**: Filters and processes data specifically for breast cancer.
+- **Steps**:
+  - Runs `split_out_condition.py` with "Breast Cancer" as the argument.
+  - Saves filtered data to the output directory.
+
+### 9. Filter and process data specifically for Alzheimer's (split_out_condition.py)
+
+- **Description**: Filters and processes data specifically for Alzheimer's.
+- **Steps**:
+  - Runs `split_out_condition.py` with "Alzheimer's" as the argument.
+  - Saves filtered data to the output directory.
+
+### 10. Create embeddings for the processed data (create_embeddings.py)
+
+- **Description**: Generates vector embeddings for data analysis.
+- **Steps**:
+  - Runs `create_embeddings.py`.
+  - Processes all JSON files in `data/cleaned`, generates text embeddings for the `BriefTitle` field using the OpenAI API, and saves the embeddings into a single JSON file.
+  - **Note**: Embeddings are vector representations of text generated using OpenAI's text-embedding-ada-002 model. This process transforms the clinical trial data into numerical formats that AI models can understand and use for various tasks such as search, recommendation, and analysis. Before creating embeddings, ensure the data is cleaned (option 4).
+
 ### 0. Exit the program
 
 - **Description**: Exits the program.
@@ -92,8 +114,8 @@ To filter and process clinical trial data based on the condition "HIV":
 
 1. Run the program:
    - `python3 app.py`
-2. Select option `7`:
-   - `Enter the number of the command you want to run: 7`
+2. Select option `9`:
+   - `Enter the number of the command you want to run: 9`
 3. Enter the condition:
    - `Enter the condition to filter by (e.g., 'Breast Cancer'): HIV`
 4. Follow prompts to complete the task.
