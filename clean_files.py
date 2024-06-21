@@ -103,6 +103,9 @@ def process_all_files():
                 relative_path = os.path.relpath(file_path, processed_data_dir)
                 cleaned_file_path = os.path.join(cleaned_data_dir, relative_path)
 
+                # Append '_cleaned' to the file name
+                cleaned_file_path = os.path.splitext(cleaned_file_path)[0] + '_cleaned.json'
+
                 # Ensure the directory exists
                 os.makedirs(os.path.dirname(cleaned_file_path), exist_ok=True)
 
