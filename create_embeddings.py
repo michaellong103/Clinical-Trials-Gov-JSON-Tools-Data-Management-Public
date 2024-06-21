@@ -1,9 +1,10 @@
 import os
 import json
+import config
 import openai
 
 # Set your OpenAI API key here
-openai.api_key = ''
+os.environ["OPENAI_API_KEY"] = config.APIKEY
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 processed_data_dir = os.path.join(BASE_DIR, 'data', 'cleaned')
