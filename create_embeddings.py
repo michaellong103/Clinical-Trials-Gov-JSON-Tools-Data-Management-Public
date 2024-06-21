@@ -6,7 +6,7 @@ import openai
 openai.api_key = ''
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-processed_data_dir = os.path.join(BASE_DIR, 'data', 'processed')
+processed_data_dir = os.path.join(BASE_DIR, 'data', 'cleaned')
 embeddings_output_dir = os.path.join(BASE_DIR, 'data', 'embeddings')
 
 # Ensure the embeddings directory exists
