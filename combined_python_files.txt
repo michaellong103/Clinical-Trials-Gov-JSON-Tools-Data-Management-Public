@@ -1,0 +1,655 @@
+***************************************************************** filename: create_embeddings.py *****************************************************************
+# ******** Part of Tools ******
+import os
+import json
+import config
+import openai
+
+# Set your OpenAI API key here
+os.environ["OPENAI_API_KEY"] = config.APIKEY
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+processed_data_dir = os.path.join(BASE_DIR, 'data', 'cleaned')
+embeddings_output_dir = os.path.join(BASE_DIR, 'data', 'embeddings')
+
+# Ensure the embeddings directory exists
+os.makedirs(embeddings_output_dir, exist_ok=True)
+
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 20 MB in bytes
+
+# Function to read and parse JSON data from a file
+def read_json(file_path):
+    with open(file_path, 'r') as file:
+        try:
+            return json.load(file)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON from file: {file_path}")
+            print(e)
+            return None
+
+# Function to generate embeddings
+def generate_embedding(text):
+    try:
+        response = openai.Embedding.create(
+            model="text-embedding-ada-002",
+            input=text
+        )
+        embedding = response['data'][0]['embedding']
+        return embedding
+    except Exception as e:
+        print(f"Error generating embedding for text: {text}")
+        print(e)
+        return None
+
+# Function to recursively search for BriefTitle in nested dictionaries
+def find_brief_title(data):
+    if isinstance(data, dict):
+        if 'BriefTitle' in data:
+            return data['BriefTitle']
+        for key, value in data.items():
+            result = find_brief_title(value)
+            if result:
+                return result
+    elif isinstance(data, list):
+        for item in data:
+            result = find_brief_title(item)
+            if result:
+                return result
+    return None
+
+# Function to write embeddings to file ensuring no file exceeds the maximum size
+def write_embeddings_to_file(directory_name, filename_suffix, embeddings):
+    file_count = 1
+    current_embeddings = []
+    current_size = 0
+
+    for embedding in embeddings:
+        embedding_size = len(json.dumps(embedding).encode('utf-8'))
+        
+        if current_size + embedding_size > MAX_FILE_SIZE:
+            output_file_path = os.path.join(embeddings_output_dir, f'{directory_name}_embeddings_{filename_suffix}_{file_count}.json')
+            with open(output_file_path, 'w') as outfile:
+                json.dump(current_embeddings, outfile, indent=4)
+            print(f"Saved embeddings to: {output_file_path}")
+            print(f"File size: {os.path.getsize(output_file_path)} bytes")
+
+            if os.path.getsize(output_file_path) > MAX_FILE_SIZE:
+                print(f"Error: File size {os.path.getsize(output_file_path)} exceeds 20 MB for {output_file_path}")
+
+            file_count += 1
+            current_embeddings = []
+            current_size = 0
+        
+        current_embeddings.append(embedding)
+        current_size += embedding_size
+
+    if current_embeddings:
+        output_file_path = os.path.join(embeddings_output_dir, f'{directory_name}_embeddings_{filename_suffix}_{file_count}.json')
+        with open(output_file_path, 'w') as outfile:
+            json.dump(current_embeddings, outfile, indent=4)
+        print(f"Saved embeddings to: {output_file_path}")
+        print(f"File size: {os.path.getsize(output_file_path)} bytes")
+
+        if os.path.getsize(output_file_path) > MAX_FILE_SIZE:
+            print(f"Error: File size {os.path.getsize(output_file_path)} exceeds 20 MB for {output_file_path}")
+
+# Function to process all files in the processed data directory
+def process_all_files(limit_files):
+    for subdir, _, files in os.walk(processed_data_dir):
+        all_embeddings = []
+        directory_name = os.path.basename(subdir)
+        
+        files_to_process = files[:10] if limit_files else files
+        
+        for file in files_to_process:
+            file_path = os.path.join(subdir, file)
+            if file.endswith('.json'):  # Ensure the file is a JSON file
+                print(f"Processing file: {file_path}")
+                raw_json = read_json(file_path)
+                if raw_json is None:
+                    continue
+
+                brief_title = find_brief_title(raw_json)
+                if brief_title:
+                    print(f"Found BriefTitle: {brief_title}")
+                    
+                    embedding = generate_embedding(brief_title)
+                    if embedding:
+                        all_embeddings.append({
+                            "file": file_path,
+                            "BriefTitle": brief_title,
+                            "embedding": embedding
+                        })
+                else:
+                    print(f"No BriefTitle found in file: {file_path}")
+
+        # Write embeddings to file, ensuring no file exceeds the maximum size
+        filename_suffix = "first10" if limit_files else "all"
+        write_embeddings_to_file(directory_name, filename_suffix, all_embeddings)
+
+# Run the processing function
+if __name__ == "__main__":
+    print("Do you want to process the first 10 files or all files?")
+    choice = input("Enter '10' for first 10 files or 'all' for all files: ").strip().lower()
+    
+    limit_files = (choice == '10')
+    
+    print("Starting to process all files...")
+    process_all_files(limit_files)
+    print("Finished processing all files.")
+
+
+
+***************************************************************** filename: test_LangChain.py *****************************************************************
+# ******** Part of Tools ******
+import os
+import sys
+import json
+import openai
+import config
+from langchain_community.vectorstores import Chroma
+from langchain_community.document_loaders import DirectoryLoader
+from langchain_community.embeddings import OpenAIEmbeddings
+
+# Ensure the OpenAI API key is set
+os.environ["OPENAI_API_KEY"] = config.APIKEY
+
+def load_documents_from_directory(directory):
+    """Recursively load documents from directory."""
+    documents = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.json') or file.endswith('.jsonl'):
+                file_path = os.path.join(root, file)
+                print(f"Loading document: {file_path}")
+                with open(file_path, 'r') as f:
+                    try:
+                        json_data = json.load(f)
+                        for item in json_data:
+                            content = "\n".join([
+                                item.get("BriefTitle", ""),
+                                item.get("BriefSummary", ""),
+                                item.get("EligibilityCriteria", ""),
+                                " ".join(cond for cond in item.get("Conditions", [])),
+                                " ".join(key for key in item.get("Keywords", [])),
+                                " ".join(interv.get("Name", "") for interv in item.get("Intervention", []))
+                            ])
+                            documents.append(content)
+                    except json.JSONDecodeError as e:
+                        print(f"Error decoding JSON from file: {file_path}")
+                        print(e)
+    return documents
+
+# Check if query is provided
+if len(sys.argv) < 2:
+    print("Usage: python test_LangChain.py <query>")
+    sys.exit(1)
+
+query = sys.argv[1]
+
+print("Loading documents from the 'data/cleaned' directory...")
+documents = load_documents_from_directory(os.path.join("data", "cleaned"))
+
+if not documents:
+    print("No documents found.")
+    sys.exit(1)
+
+print(f"Number of documents loaded: {len(documents)}")
+
+# Initialize OpenAI embeddings
+embedding_function = OpenAIEmbeddings(model="text-embedding-ada-002")
+
+# Initialize Chroma vector store
+chroma_vector_store = Chroma(collection_name="my_collection", embedding_function=embedding_function)
+
+# Add documents to the vector store
+print("Adding documents to the vector store...")
+for doc in documents:
+    try:
+        print(f"Adding document: {doc[:100]}")  # Print first 100 characters for debugging
+        chroma_vector_store.add_texts([doc])
+    except Exception as e:
+        print(f"Error adding document: {e}")
+
+print("Documents added to the vector store.")
+
+# Perform a search
+print("Performing a similarity search...")
+try:
+    results = chroma_vector_store.similarity_search(query)
+    if results:
+        print(f"Found {len(results)} results:")
+        for result in results:
+            print(result)
+    else:
+        print("Found 0 results")
+except Exception as e:
+    print(f"Error during similarity search: {e}")
+
+# Additional debugging for embeddings and queries
+print("Debugging information:")
+print(f"Query: {query}")
+try:
+    query_embedding = embedding_function.embed([query])
+    print(f"Query Embedding: {query_embedding}")
+except Exception as e:
+    print(f"Error generating query embedding: {e}")
+
+# Verify the size of vector store
+try:
+    vector_store_size = len(chroma_vector_store._index)
+    print(f"Vector store size: {vector_store_size}")
+except Exception as e:
+    print(f"Error checking vector store size: {e}")
+
+
+
+***************************************************************** filename: split_out_random.py *****************************************************************
+# ******** Part of Tools ******
+import os
+import json
+import random
+import sys
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def print_step(message, step):
+    shades_of_green = [
+        "\033[32m",  # Green
+        "\033[92m",  # Light green
+        "\033[32;1m",  # Bright green
+        "\033[92;1m",  # Brighter green
+    ]
+    reset_color = "\033[0m"
+    color = shades_of_green[step % len(shades_of_green)]
+    print(f"{color}{message}{reset_color}")
+
+def list_directories(base_path):
+    if not os.path.exists(base_path):
+        print(f"Base path '{base_path}' does not exist.")
+        sys.exit(0)
+    dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
+    return dirs
+
+def select_directory(directories):
+    print("Please select the directory to use:")
+    for idx, directory in enumerate(directories):
+        print(f"{idx + 1}. {directory}")
+    while True:
+        try:
+            choice = int(input("Enter the number of the directory: ").strip())
+            if 1 <= choice <= len(directories):
+                return directories[choice - 1]
+            else:
+                print("Invalid choice. Please select a number from the list.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+
+def read_json_files(directory):
+    data = []
+    file_mapping = {}
+    print(f"Listing files in directory: {directory}")
+    for root, _, files in os.walk(directory):
+        for filename in files:
+            if filename.endswith(".json"):
+                file_path = os.path.join(root, filename)
+                try:
+                    with open(file_path, 'r') as file:
+                        json_data = json.load(file)
+                        if isinstance(json_data, list):
+                            data.extend(json_data)
+                            file_mapping[file_path] = len(json_data)
+                        else:
+                            data.append(json_data)
+                            file_mapping[file_path] = 1
+                except json.JSONDecodeError as e:
+                    print(f"Error: The file {file_path} is not a valid JSON file. Error: {e}")
+                except Exception as e:
+                    print(f"Error: Failed to read file {file_path}. Error: {e}")
+    return data, file_mapping
+
+def random_split(data, test_size=0.2):
+    random.shuffle(data)
+    split_index = int(len(data) * (1 - test_size))
+    train_data = data[:split_index]
+    test_data = data[split_index:]
+    return train_data, test_data
+
+def save_split_data(data, file_mapping, output_dir, suffix):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    start_idx = 0
+    for file_path, num_items in file_mapping.items():
+        filename = os.path.basename(file_path)
+        output_path = os.path.join(output_dir, f"{filename.split('.')[0]}_{suffix}.json")
+        subset = data[start_idx:start_idx + num_items]
+        start_idx += num_items
+        with open(output_path, 'w') as file:
+            json.dump(subset, file, indent=2)
+        print(f"Saved {len(subset)} items to {output_path}.")
+
+def main():
+    # Adjust the path to the correct directory for extracted data
+    extract_base_dir = os.path.join(BASE_DIR, '..', 'data', 'extracted')
+    
+    directories = list_directories(extract_base_dir)
+    
+    if not directories:
+        print_step("No directories found in the extracted folder. Please use the appropriate option in app.py to extract the zip file.", 0)
+        sys.exit(0)
+
+    selected_directory = select_directory(directories)
+    extract_to = os.path.join(extract_base_dir, selected_directory)
+    output_dir = os.path.join(BASE_DIR, '..', 'data', 'processed', 'random_split')
+
+    print("Selected Extracted Directory:", extract_to)
+    print("Output Directory:", output_dir)
+
+    # Check if the extraction directory is not empty
+    if not os.listdir(extract_to):
+        print_step("The selected directory is empty. Please use the appropriate option in app.py to extract the zip file.", 0)
+        sys.exit(0)
+
+    # Step 1: Read the extracted JSON files
+    print_step("Step 1: Reading extracted JSON files...", 1)
+    data, file_mapping = read_json_files(extract_to)
+    print(f"Read {len(data)} trials from extracted JSON files.")
+
+    # Step 2: Randomly split the data
+    print_step("Step 2: Randomly splitting the data...", 2)
+    train_data, test_data = random_split(data, 0.2)
+    print(f"Split data into {len(train_data)} training and {len(test_data)} testing items.")
+
+    # Step 3: Save the split data
+    print_step("Step 3: Saving the split data...", 3)
+    save_split_data(train_data, file_mapping, output_dir, 'train')
+    save_split_data(test_data, file_mapping, output_dir, 'test')
+
+if __name__ == '__main__':
+    main()
+
+
+
+***************************************************************** filename: delete_json_files.py *****************************************************************
+# ******** Part of Tools ******
+import os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+import shutil
+
+def delete_json_files_and_empty_folders(directory):
+    # Track deleted files and folders
+    deleted_files = []
+    deleted_folders = []
+
+    # Delete JSON files
+    for root, dirs, files in os.walk(directory, topdown=False):
+        for file in files:
+            if file.endswith(".json"):
+                file_path = os.path.join(root, file)
+                try:
+                    os.remove(file_path)
+                    deleted_files.append(file_path)
+                except Exception as e:
+                    print(f"Failed to delete {file_path}: {e}")
+
+    # Delete empty third-level folders
+    for root, dirs, files in os.walk(directory, topdown=False):
+        if root.count(os.sep) == directory.count(os.sep) + 2:  # third-level folders
+            if not files and not dirs:
+                try:
+                    os.rmdir(root)
+                    deleted_folders.append(root)
+                except Exception as e:
+                    print(f"Failed to delete {root}: {e}")
+
+    # Delete empty folders on the same level as the subfolders of processed or cleaned
+    for subfolder in ['processed', 'cleaned']:
+        subfolder_path = os.path.join(directory, subfolder)
+        if os.path.exists(subfolder_path):
+            for item in os.listdir(subfolder_path):
+                item_path = os.path.join(subfolder_path, item)
+                if os.path.isdir(item_path) and not os.listdir(item_path):
+                    try:
+                        os.rmdir(item_path)
+                        deleted_folders.append(item_path)
+                    except Exception as e:
+                        print(f"Failed to delete {item_path}: {e}")
+
+    return deleted_files, deleted_folders
+
+def clear_extracted_folder(directory):
+    extracted_folder = os.path.join(directory, 'raw', 'extracted')
+    if os.path.exists(extracted_folder):
+        for root, dirs, files in os.walk(extracted_folder, topdown=False):
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    os.remove(file_path)
+                    print(f"Deleted file: {file_path}")
+                except Exception as e:
+                    print(f"Failed to delete {file_path}: {e}")
+            for dir in dirs:
+                dir_path = os.path.join(root, dir)
+                try:
+                    os.rmdir(dir_path)
+                    print(f"Deleted folder: {dir_path}")
+                except Exception as e:
+                    print(f"Failed to delete {dir_path}: {e}")
+
+def main():
+    data_directory = 'data'  # Adjust the path to your data directory
+    deleted_files, deleted_folders = delete_json_files_and_empty_folders(data_directory)
+    
+    print("Deleted JSON files:")
+    for file in deleted_files:
+        print(file)
+    
+    print("\nDeleted empty folders:")
+    for folder in deleted_folders:
+        print(folder)
+    
+    print("\nClearing extracted folder...")
+    clear_extracted_folder(data_directory)
+    
+    print("Cleanup completed.")
+
+if __name__ == '__main__':
+    main()
+
+
+
+***************************************************************** filename: test_openai_key.py *****************************************************************
+# ******** Part of Tools ******
+import os
+import config
+
+# Set the environment variable
+os.environ["OPENAI_API_KEY"] = config.OPENAI_API_KEY
+
+# Check if the environment variable is set and print it
+api_key = os.environ.get("OPENAI_API_KEY")
+if api_key:
+    print(f"OPENAI_API_KEY is set: {api_key}")
+else:
+    print("OPENAI_API_KEY is not set")
+
+
+***************************************************************** filename: status.py *****************************************************************
+# ******** Part of Tools ******
+import os
+from datetime import datetime
+
+# Base directory of the script
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def get_directory_summary(directory):
+    created = datetime.fromtimestamp(os.path.getctime(directory)).strftime('%Y-%m-%d %H:%M:%S')
+    modified = datetime.fromtimestamp(os.path.getmtime(directory)).strftime('%Y-%m-%d %H:%M:%S')
+    number_of_files = sum([len(files) for _, _, files in os.walk(directory)])
+    number_of_subdirs = sum([len(dirs) for _, dirs, _ in os.walk(directory)])
+    return {
+        'created_date': created,
+        'modified_date': modified,
+        'number_of_files': number_of_files,
+        'number_of_subdirs': number_of_subdirs
+    }
+
+def get_summary_info(base_directory):
+    summary_info = []
+    for root, dirs, files in os.walk(base_directory):
+        if root == base_directory:
+            for subdir in dirs:
+                subdir_path = os.path.join(root, subdir)
+                subdir_info = get_directory_summary(subdir_path)
+                subdir_info['path'] = subdir_path
+                summary_info.append(subdir_info)
+    return summary_info
+
+def print_in_pink(text):
+    pink = '\033[95m'
+    reset = '\033[0m'
+    print(f"{pink}{text}{reset}")
+
+def print_in_white(text):
+    white = '\033[97m'
+    reset = '\033[0m'
+    print(f"{white}{text}{reset}")
+
+def print_directory_tree(directory, level=1):
+    for root, dirs, files in os.walk(directory):
+        if root == directory:
+            indent = ' ' * 4 * (level - 1)
+            print(f"{indent}{os.path.basename(root)}/")
+            for subdir in dirs:
+                print(f"{indent}    {subdir}/")
+            for file in files:
+                print(f"{indent}    {file}")
+            break
+
+def check_and_report_directory(directory, directory_name):
+    if not os.path.exists(directory):
+        print_in_white(f"{directory_name} directory does not exist. Please run the necessary steps to build the data directories.")
+        return False
+    return True
+
+def main():
+    status = {}
+
+    # Paths
+    raw_dir = os.path.join(BASE_DIR, 'data', 'raw')
+    processed_dir = os.path.join(BASE_DIR, 'data', 'processed')
+    cleaned_dir = os.path.join(BASE_DIR, 'data', 'cleaned')
+    extracted_dir = os.path.join(BASE_DIR, 'data', 'extracted')
+
+    # Check and report directories
+    raw_exists = check_and_report_directory(raw_dir, 'Raw')
+    processed_exists = check_and_report_directory(processed_dir, 'Processed')
+    cleaned_exists = check_and_report_directory(cleaned_dir, 'Cleaned')
+    extracted_exists = check_and_report_directory(extracted_dir, 'Extracted')
+
+    if not (raw_exists or processed_exists or cleaned_exists or extracted_exists):
+        return
+
+    if raw_exists:
+        # Search for ZIP files in /raw
+        raw_zip_files = [f for f in os.listdir(raw_dir) if f.endswith('.zip')]
+        status['raw_zip_files'] = []
+        for zip_file in raw_zip_files:
+            zip_path = os.path.join(raw_dir, zip_file)
+            dir_info = get_directory_summary(raw_dir)
+            status['raw_zip_files'].append({
+                'path': zip_path,
+                'created_date': dir_info['created_date'],
+                'modified_date': dir_info['modified_date'],
+                'number_of_files': dir_info['number_of_files']
+            })
+
+    if processed_exists:
+        # Processed JSON directories
+        processed_summaries = get_summary_info(processed_dir)
+        status['processed_files'] = {
+            'path': processed_dir,
+            'total_subdirectories': len(processed_summaries),
+            'total_files': sum(info['number_of_files'] for info in processed_summaries),
+            'created_date': get_directory_summary(processed_dir)['created_date'],
+            'modified_date': get_directory_summary(processed_dir)['modified_date']
+        }
+
+    if cleaned_exists:
+        # Cleaned JSON directories
+        cleaned_summaries = get_summary_info(cleaned_dir)
+        status['cleaned_files'] = {
+            'path': cleaned_dir,
+            'total_subdirectories': len(cleaned_summaries),
+            'total_files': sum(info['number_of_files'] for info in cleaned_summaries),
+            'created_date': get_directory_summary(cleaned_dir)['created_date'],
+            'modified_date': get_directory_summary(cleaned_dir)['modified_date']
+        }
+
+    if extracted_exists:
+        # Extracted directories
+        extracted_summaries = get_summary_info(extracted_dir)
+        status['extracted_files'] = {
+            'path': extracted_dir,
+            'total_subdirectories': len(extracted_summaries),
+            'total_files': sum(info['number_of_files'] for info in extracted_summaries),
+            'created_date': get_directory_summary(extracted_dir)['created_date'],
+            'modified_date': get_directory_summary(extracted_dir)['modified_date']
+        }
+
+    # Print status
+    print_in_pink("=" * 50)
+    print_in_pink("Status Report")
+    print_in_pink("=" * 50)
+
+    if raw_exists:
+        print_in_pink("Raw ZIP files:")
+        for zip_file in status['raw_zip_files']:
+            print_in_white(f"  Path: {zip_file['path']}")
+            print_in_white(f"  Created: {zip_file['created_date']}")
+            print_in_white(f"  Last modified: {zip_file['modified_date']}")
+            print_in_white(f"  Number of files: {zip_file['number_of_files']}\n")
+
+    if processed_exists:
+        print_in_pink("Processed JSON directories:")
+        print_in_white(f"  Path: {status['processed_files']['path']}")
+        print_in_white(f"  Total subdirectories: {status['processed_files']['total_subdirectories']}")
+        print_in_white(f"  Total files: {status['processed_files']['total_files']}")
+        print_in_white(f"  Created: {status['processed_files']['created_date']}")
+        print_in_white(f"  Last modified: {status['processed_files']['modified_date']}\n")
+
+    if cleaned_exists:
+        print_in_pink("Cleaned JSON directories:")
+        print_in_white(f"  Path: {status['cleaned_files']['path']}")
+        print_in_white(f"  Total subdirectories: {status['cleaned_files']['total_subdirectories']}")
+        print_in_white(f"  Total files: {status['cleaned_files']['total_files']}")
+        print_in_white(f"  Created: {status['cleaned_files']['created_date']}")
+        print_in_white(f"  Last modified: {status['cleaned_files']['modified_date']}\n")
+
+    if extracted_exists:
+        print_in_pink("Extracted JSON directories:")
+        print_in_white(f"  Path: {status['extracted_files']['path']}")
+        print_in_white(f"  Total subdirectories: {status['extracted_files']['total_subdirectories']}")
+        print_in_white(f"  Total files: {status['extracted_files']['total_files']}")
+        print_in_white(f"  Created: {status['extracted_files']['created_date']}")
+        print_in_white(f"  Last modified: {status['extracted_files']['modified_date']}\n")
+
+    print_in_pink("=" * 50)
+
+    # Print directory trees
+    if processed_exists:
+        print_in_pink("Processed Directory Tree:")
+        print_directory_tree(processed_dir)
+    if cleaned_exists:
+        print_in_pink("Cleaned Directory Tree:")
+        print_directory_tree(cleaned_dir)
+    if extracted_exists:
+        print_in_pink("Extracted Directory Tree:")
+        print_directory_tree(extracted_dir)
+
+if __name__ == '__main__':
+    main()
+
+
+

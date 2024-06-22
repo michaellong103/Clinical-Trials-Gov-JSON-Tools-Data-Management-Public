@@ -1,3 +1,4 @@
+# ******** Part of Process ******
 import os
 from extract_zip import extract_zip
 from clean_files import load_json_files, clean_data, save_clean_data

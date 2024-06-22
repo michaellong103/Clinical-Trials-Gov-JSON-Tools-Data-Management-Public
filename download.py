@@ -1,3 +1,4 @@
+# ******** Part of Process (not required) ******
 import os
 import requests
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
