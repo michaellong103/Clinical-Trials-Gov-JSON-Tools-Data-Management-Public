@@ -1,174 +1,173 @@
 # ******** Part of Tools ******
 import os
 from datetime import datetime
+import humanize  # Make sure to install the humanize package
 
 # Base directory of the script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_directory_summary(directory):
-    created = datetime.fromtimestamp(os.path.getctime(directory)).strftime('%Y-%m-%d %H:%M:%S')
-    modified = datetime.fromtimestamp(os.path.getmtime(directory)).strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now()
+    created_timestamp = os.path.getctime(directory)
+    modified_timestamp = os.path.getmtime(directory)
+    created_date = datetime.fromtimestamp(created_timestamp).strftime('%Y-%m-%d %H:%M:%S')
+    modified_date = datetime.fromtimestamp(modified_timestamp).strftime('%Y-%m-%d %H:%M:%S')
     number_of_files = sum([len(files) for _, _, files in os.walk(directory)])
-    number_of_subdirs = sum([len(dirs) for _, dirs, _ in os.walk(directory)])
+    total_size = sum([os.path.getsize(os.path.join(root, file)) for root, _, files in os.walk(directory) for file in files])
+    created_ago = humanize.naturaltime(now - datetime.fromtimestamp(created_timestamp))
+    
+    # Collect file types
+    file_types = set()
+    for root, _, files in os.walk(directory):
+        for file in files:
+            file_extension = os.path.splitext(file)[1].lower()
+            file_types.add(file_extension)
+    file_types = ', '.join([f"[{ext.upper()}]" for ext in file_types])
+
     return {
-        'created_date': created,
-        'modified_date': modified,
+        'created_date': f"{created_date} ({created_ago})",
+        'modified_date': modified_date,
         'number_of_files': number_of_files,
-        'number_of_subdirs': number_of_subdirs
+        'total_size': total_size,
+        'file_types': file_types
     }
 
-def get_summary_info(base_directory):
-    summary_info = []
-    for root, dirs, files in os.walk(base_directory):
-        if root == base_directory:
-            for subdir in dirs:
-                subdir_path = os.path.join(root, subdir)
-                subdir_info = get_directory_summary(subdir_path)
-                subdir_info['path'] = subdir_path
-                summary_info.append(subdir_info)
-    return summary_info
+def format_size(size):
+    """Format the size to a readable format (bytes, KB, MB, GB)."""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024:
+            return f"{size:.2f} {unit}"
+        size /= 1024
+    return f"{size:.2f} TB"
 
-def print_in_pink(text):
-    pink = '\033[95m'
+def print_in_color(text, color_code):
     reset = '\033[0m'
-    print(f"{pink}{text}{reset}")
+    print(f"{color_code}{text}{reset}")
 
-def print_in_white(text):
-    white = '\033[97m'
-    reset = '\033[0m'
-    print(f"{white}{text}{reset}")
+def print_directory_summary(summary, directory_name, color_code):
+    for subdir in summary:
+        created_date = subdir['created_date']
+        total_size = format_size(subdir['total_size'])
+        number_of_files = subdir['number_of_files']
+        file_types = subdir['file_types']
+        print(f"{directory_name} - Created: \033[93m{created_date}\033[0m, Size: \033[92m{total_size}\033[0m, Number of files: \033[91m{number_of_files}\033[0m, File types: \033[96m{file_types}\033[0m")  # Yellow for created_date, Green for size, Red for number of files, Cyan for file types
 
-def print_directory_tree(directory, level=1):
-    for root, dirs, files in os.walk(directory):
+def print_directory_tree(directory, level=1, indent='    '):
+    tree_structure = []
+    nct_dirs = 0
+    for root, dirs, _ in os.walk(directory):
         if root == directory:
-            indent = ' ' * 4 * (level - 1)
-            print(f"{indent}{os.path.basename(root)}/")
-            for subdir in dirs:
-                print(f"{indent}    {subdir}/")
-            for file in files:
-                print(f"{indent}    {file}")
+            if not dirs:
+                tree_structure.append(f"{os.path.basename(root)}/ \033[91m[EMPTY DIRECTORY]\033[0m")  # Red
+            else:
+                tree_structure.append(f"{os.path.basename(root)}/")
+                for subdir in dirs:
+                    if subdir.startswith("NCT"):
+                        nct_dirs += 1
+                    else:
+                        subdir_path = os.path.join(root, subdir)
+                        subdir_summary = get_directory_summary(subdir_path)
+                        tree_structure.append(f"{indent}{subdir}/ - Created: \033[93m{subdir_summary['created_date']}\033[0m, Size: \033[92m{format_size(subdir_summary['total_size'])}\033[0m, Number of files: \033[91m{subdir_summary['number_of_files']}\033[0m, File types: \033[96m{subdir_summary['file_types']}\033[0m")
+                if nct_dirs > 0:
+                    tree_structure.append(f"{indent}\033[96m{nct_dirs} NCT[x] directories\033[0m")  # Cyan
             break
-
-def check_and_report_directory(directory, directory_name):
-    if not os.path.exists(directory):
-        print_in_white(f"{directory_name} directory does not exist. Please run the necessary steps to build the data directories.")
-        return False
-    return True
+    return "\n".join(tree_structure)
 
 def main():
     status = {}
 
     # Paths
     raw_dir = os.path.join(BASE_DIR, 'data', 'raw')
+    extracted_dir = os.path.join(BASE_DIR, 'data', 'extracted')
     processed_dir = os.path.join(BASE_DIR, 'data', 'processed')
     cleaned_dir = os.path.join(BASE_DIR, 'data', 'cleaned')
-    extracted_dir = os.path.join(BASE_DIR, 'data', 'extracted')
+    embeddings_dir = os.path.join(BASE_DIR, 'data', 'embeddings')
+    md_dir = os.path.join(BASE_DIR, 'data', 'md')
+    txt_dir = os.path.join(BASE_DIR, 'data', 'txt')
 
     # Check and report directories
-    raw_exists = check_and_report_directory(raw_dir, 'Raw')
-    processed_exists = check_and_report_directory(processed_dir, 'Processed')
-    cleaned_exists = check_and_report_directory(cleaned_dir, 'Cleaned')
-    extracted_exists = check_and_report_directory(extracted_dir, 'Extracted')
+    raw_exists = os.path.exists(raw_dir)
+    extracted_exists = os.path.exists(extracted_dir)
+    processed_exists = os.path.exists(processed_dir)
+    cleaned_exists = os.path.exists(cleaned_dir)
+    embeddings_exists = os.path.exists(embeddings_dir)
+    md_exists = os.path.exists(md_dir)
+    txt_exists = os.path.exists(txt_dir)
 
-    if not (raw_exists or processed_exists or cleaned_exists or extracted_exists):
+    if not (raw_exists or extracted_exists or processed_exists or cleaned_exists or embeddings_exists or md_exists or txt_exists):
+        print_in_color("No data directories found. Please run the necessary steps to build the data directories.", '\033[91m')  # Red
         return
 
+    # Collect summaries
     if raw_exists:
-        # Search for ZIP files in /raw
-        raw_zip_files = [f for f in os.listdir(raw_dir) if f.endswith('.zip')]
-        status['raw_zip_files'] = []
-        for zip_file in raw_zip_files:
-            zip_path = os.path.join(raw_dir, zip_file)
-            dir_info = get_directory_summary(raw_dir)
-            status['raw_zip_files'].append({
-                'path': zip_path,
-                'created_date': dir_info['created_date'],
-                'modified_date': dir_info['modified_date'],
-                'number_of_files': dir_info['number_of_files']
-            })
-
-    if processed_exists:
-        # Processed JSON directories
-        processed_summaries = get_summary_info(processed_dir)
-        status['processed_files'] = {
-            'path': processed_dir,
-            'total_subdirectories': len(processed_summaries),
-            'total_files': sum(info['number_of_files'] for info in processed_summaries),
-            'created_date': get_directory_summary(processed_dir)['created_date'],
-            'modified_date': get_directory_summary(processed_dir)['modified_date']
-        }
-
-    if cleaned_exists:
-        # Cleaned JSON directories
-        cleaned_summaries = get_summary_info(cleaned_dir)
-        status['cleaned_files'] = {
-            'path': cleaned_dir,
-            'total_subdirectories': len(cleaned_summaries),
-            'total_files': sum(info['number_of_files'] for info in cleaned_summaries),
-            'created_date': get_directory_summary(cleaned_dir)['created_date'],
-            'modified_date': get_directory_summary(cleaned_dir)['modified_date']
-        }
+        raw_summary = get_directory_summary(raw_dir)
+        status['raw'] = raw_summary
 
     if extracted_exists:
-        # Extracted directories
-        extracted_summaries = get_summary_info(extracted_dir)
-        status['extracted_files'] = {
-            'path': extracted_dir,
-            'total_subdirectories': len(extracted_summaries),
-            'total_files': sum(info['number_of_files'] for info in extracted_summaries),
-            'created_date': get_directory_summary(extracted_dir)['created_date'],
-            'modified_date': get_directory_summary(extracted_dir)['modified_date']
-        }
+        extracted_summary = get_directory_summary(extracted_dir)
+        status['extracted'] = extracted_summary
+
+    if processed_exists:
+        processed_summary = get_directory_summary(processed_dir)
+        status['processed'] = processed_summary
+
+    if cleaned_exists:
+        cleaned_summary = get_directory_summary(cleaned_dir)
+        status['cleaned'] = cleaned_summary
+
+    if embeddings_exists:
+        embeddings_summary = get_directory_summary(embeddings_dir)
+        status['embeddings'] = embeddings_summary
+
+    if md_exists:
+        md_summary = get_directory_summary(md_dir)
+        status['md'] = md_summary
+
+    if txt_exists:
+        txt_summary = get_directory_summary(txt_dir)
+        status['txt'] = txt_summary
 
     # Print status
-    print_in_pink("=" * 50)
-    print_in_pink("Status Report")
-    print_in_pink("=" * 50)
+    print_in_color("=" * 50, '\033[95m')  # Pink
+    print_in_color("Status Report", '\033[95m')  # Pink
+    print_in_color("=" * 50, '\033[95m')  # Pink
 
     if raw_exists:
-        print_in_pink("Raw ZIP files:")
-        for zip_file in status['raw_zip_files']:
-            print_in_white(f"  Path: {zip_file['path']}")
-            print_in_white(f"  Created: {zip_file['created_date']}")
-            print_in_white(f"  Last modified: {zip_file['modified_date']}")
-            print_in_white(f"  Number of files: {zip_file['number_of_files']}\n")
-
-    if processed_exists:
-        print_in_pink("Processed JSON directories:")
-        print_in_white(f"  Path: {status['processed_files']['path']}")
-        print_in_white(f"  Total subdirectories: {status['processed_files']['total_subdirectories']}")
-        print_in_white(f"  Total files: {status['processed_files']['total_files']}")
-        print_in_white(f"  Created: {status['processed_files']['created_date']}")
-        print_in_white(f"  Last modified: {status['processed_files']['modified_date']}\n")
-
-    if cleaned_exists:
-        print_in_pink("Cleaned JSON directories:")
-        print_in_white(f"  Path: {status['cleaned_files']['path']}")
-        print_in_white(f"  Total subdirectories: {status['cleaned_files']['total_subdirectories']}")
-        print_in_white(f"  Total files: {status['cleaned_files']['total_files']}")
-        print_in_white(f"  Created: {status['cleaned_files']['created_date']}")
-        print_in_white(f"  Last modified: {status['cleaned_files']['modified_date']}\n")
+        print_directory_summary([status['raw']], "Step 1: Raw", '\033[95m')
+        print_in_color(print_directory_tree(raw_dir), '\033[97m')  # White
+        print()
 
     if extracted_exists:
-        print_in_pink("Extracted JSON directories:")
-        print_in_white(f"  Path: {status['extracted_files']['path']}")
-        print_in_white(f"  Total subdirectories: {status['extracted_files']['total_subdirectories']}")
-        print_in_white(f"  Total files: {status['extracted_files']['total_files']}")
-        print_in_white(f"  Created: {status['extracted_files']['created_date']}")
-        print_in_white(f"  Last modified: {status['extracted_files']['modified_date']}\n")
+        print_directory_summary([status['extracted']], "Step 2: Extracted", '\033[95m')
+        print_in_color(print_directory_tree(extracted_dir), '\033[97m')  # White
+        print()
 
-    print_in_pink("=" * 50)
-
-    # Print directory trees
     if processed_exists:
-        print_in_pink("Processed Directory Tree:")
-        print_directory_tree(processed_dir)
+        print_directory_summary([status['processed']], "Step 3: Processed", '\033[95m')
+        print_in_color(print_directory_tree(processed_dir), '\033[97m')  # White
+        print()
+
     if cleaned_exists:
-        print_in_pink("Cleaned Directory Tree:")
-        print_directory_tree(cleaned_dir)
-    if extracted_exists:
-        print_in_pink("Extracted Directory Tree:")
-        print_directory_tree(extracted_dir)
+        print_directory_summary([status['cleaned']], "Step 4: Cleaned", '\033[95m')
+        print_in_color(print_directory_tree(cleaned_dir), '\033[97m')  # White
+        print()
+
+    # Additional directories after the main process
+    additional_dirs = {
+        'Embeddings': embeddings_exists,
+        'MD': md_exists,
+        'TXT': txt_exists,
+    }
+
+    for dir_name, exists in additional_dirs.items():
+        if exists:
+            summary = status[dir_name.lower()]
+            print_directory_summary([summary], f"{dir_name}", '\033[95m')
+            directory = os.path.join(BASE_DIR, f"data/{dir_name.lower()}")
+            print_in_color(print_directory_tree(directory), '\033[97m')  # White
+            print()
+
+    print_in_color("=" * 50, '\033[95m')  # Pink
 
 if __name__ == '__main__':
     main()

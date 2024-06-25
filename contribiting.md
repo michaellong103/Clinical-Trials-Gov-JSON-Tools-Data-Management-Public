@@ -2,7 +2,7 @@
 
 We welcome contributions from the community. Here are some guidelines to help you get started.
 
-## Reporting Issues
+## Reporting Issues 
 
 If you find a bug or have a feature request, please open an issue on GitHub.
 
